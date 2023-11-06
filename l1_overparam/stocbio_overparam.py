@@ -14,7 +14,7 @@ This is equivalent to solving
 
     min_z |z| + G(z)
     
-    In our case choose G(t) = exp(t)
+    In our case choose G(t) = (x-1)**2
     
     optimal lambda = 0
 

@@ -6,17 +6,19 @@ Solve bilevel problem as system of SDEs:
     min_lam  C(x(lam),lam)
     s.t. x(lam) = argmin_x F(x,lam)
 2-D PROBLEM:
-    C(x,lam) = (1/2) * (x)^2 + (1/2) * (lambda)^2 + G(x*lambda)
-    F(x,lam) = (1/2) * (x)^2 + (1/2) * (lambda)^2 + G(x*lambda)
+    C(x,lam) = (1/2) * (x)^2 + (1/2) * (lambda)^2 + (1/2)*G(x*lambda)
+    F(x,lam) = (1/2) * (x)^2 + (1/2) * (lambda)^2 + (1/2)*G(x*lambda)
     for some smooth G: R -> R
     
 This is equivalent to solving 
 
-    min_z |z| + G(z)
+    min_z 2|z| + G(z)
     
-    In our case choose G(t) = (x-1)**2
+    In our case choose G(t) = (t-2)**2
     
-    optimal lambda = 0
+    Expected optimum at z = 1 or, equivalently, at x = lam = +-1.
+    
+    
 
 @author: ichel
 """
@@ -25,6 +27,8 @@ import math
 import numpy as np
 import scipy.stats
 import matplotlib.pyplot as plt
+import colorsys
+import random
 
 
 class Model:
@@ -34,35 +38,35 @@ class Model:
     """Epsilon serves to differentiate between the two timesteps of the inner and outer problem"""
     EPSILON = 0.05
 
-def G_xl(x: float, lam: float) -> float:
+def G_xl(t: float) -> float:
     """Encode G(x,lambda)"""
     #gxl = np.exp(x*lam)
-    gxl = (x-1)**2
+    gxl = (1/2)*(t-2)**2
     return gxl
     
-def grad_G_xl(x: float, lam: float) -> float:
-    """Encode derivative of G(x,lambda)"""
+def grad_G_xl(t: float) -> float:
+    """Encode derivative of G(t)"""
     #gxl = np.exp(x*lam)
-    gxl = 2*(x-1)
+    gxl = (t-2)
     return gxl
     
-def hess_G_xl(x: float, lam: float) -> float:
+def hess_G_xl(t: float) -> float:
     """Encode second derivative of G(x,lambda)"""
     #gxl = np.exp(x*lam)
-    gxl = 2
+    gxl = 1
     return gxl
 
 def mu_x(x: float, lam: float, _t: float) -> float:
     """Implement the drift term for x (inner, quick sde)."""
-    nab_x_F = x + lam * grad_G_xl(x,lam)
+    nab_x_F = x + lam * grad_G_xl(x*lam)
     return nab_x_F
 
 def mu_lam(x: float, lam: float, _t: float) -> float:
     """Implement the drift term for lambda (outer, slow sde)."""
-    nab_l_C = lam + x * grad_G_xl(x,lam)
-    nab_xl_F = grad_G_xl(x,lam) + x * lam * hess_G_xl(lam,x)
-    nab_xx_F = 1 + (lam**2)*hess_G_xl(lam,x)
-    nab_x_C = x + lam * grad_G_xl(x,lam)
+    nab_l_C = lam + x * grad_G_xl(x*lam)
+    nab_xl_F = grad_G_xl(x*lam) + x * lam * hess_G_xl(x*lam)
+    nab_xx_F = 1 + (lam**2)*hess_G_xl(x*lam)
+    nab_x_C = x + lam * grad_G_xl(x*lam)
     
     nab_L = nab_l_C + (nab_xl_F/nab_xx_F) * nab_x_C
     
@@ -84,23 +88,19 @@ def dW(delta_t: float) -> float:
 
 def nablam_F(x: float, lam: float, _t: float) -> float:
     """Return the gradient of F w.r.t. lambda"""
-    return lam * x**2
+    return lam + x * grad_G_xl(x*lam)
 
-def mckean_term(x: float, lam: float, t: float, DT: float, num_xs: int) -> float:
+def mckean_term(xvs, lam: float, t: float, DT: float, num_xs: int) -> float:
     """Return the extra term from the Mckean-Vlasov SDE"""
-    eps0 = Model.EPSILON
-    
-    mean_X = x + mu_x(x, lam, t)*DT/eps0
-    sig_X = sigma_x(x, lam, t) * np.sqrt(DT)
-    distrib = scipy.stats.norm(mean_X, sig_X)
     
     xvals = np.zeros(num_xs)
     nablamFs = np.zeros(num_xs)
     pdfx = np.zeros(num_xs)
     integ = 0
+    eps0 = Model.EPSILON
     
     for i in range(num_xs):
-        xvals[i] = mean_X + sigma_x(x, lam, t) * dW(DT)
+        xvals[i] = xvs[i] - mu_x(xvs[i],lam,t)*DT/eps0 + sigma_x(xvs[i], lam, t) * dW(DT)
         #print("X_{n+1} = " + str(xnew))
         nablamFs[i] = nablam_F(xvals[i],lam,t)
         #("nabla_lam_F" + str(nablamF))
@@ -116,8 +116,7 @@ def mckean_term(x: float, lam: float, t: float, DT: float, num_xs: int) -> float
     print(xvals)
     print(integ)
     
-    mvt = (-1/eps0) * nablam_F(x,lam,t) + (1/eps0)*integ
-    return mvt
+    return integ, xvals
 
 
 def run_sde():
@@ -132,7 +131,7 @@ def run_sde():
 
 
     X_INIT = 0
-    L_INIT = 1
+    L_INIT = 0
 
     xs = np.zeros(TS.size)
     xs[0] = X_INIT
@@ -152,37 +151,54 @@ def run_sde():
 def run_mckean(num_xs: int):
     """ Return the result of one full simulation."""
     T_INIT = 0
-    T_END = 5
+    T_END = 10
     eps = Model.EPSILON
     
-    N = 2000  # Compute at 1000 grid points
+    N = 4000  # Compute at 1000 grid points
     DT = float(T_END - T_INIT) / N
     TS = np.arange(T_INIT, T_END + DT, DT)
 
 
     X_INIT = 0
-    L_INIT = 1
+    L_INIT = 0
 
+    """Initialize arrays to save intermediate results"""
+    #xs = np.zeros((num_xs,TS.size))
     xs = np.zeros(TS.size)
+    #xs[:,0] = X_INIT
     xs[0] = X_INIT
     ls = np.zeros(TS.size)
     ls[0] = L_INIT
-    mts = np.zeros(TS.size)
+    """Initialize first batch of x-values"""
+    xvs = X_INIT * np.ones(TS.size)
+    x_arg = random.choice(range(num_xs))
     for i in range(1, TS.size):
         t = T_INIT + (i - 1) * DT
-        x = xs[i - 1]
         lam = ls[i - 1]
-        mts[i] = mckean_term(x, lam, t, DT, num_xs)
-        xs[i] = x + mu_x(x, lam, t) * DT/eps + sigma_x(x, lam, t) * dW(DT)
-        ls[i] = lam + mts[i] * DT + mu_lam(x, lam, t) * DT + sigma_lam(x, lam, t) * dW(DT)
+        """Generate multiple X values for next timestep alongside the integral term"""
+        integ, xvs = mckean_term(xvs, lam, t, DT, num_xs)
+        #xs[:,i] = xvs
+        x = xvs[x_arg]
+        xs[i] = x
+        mvt = (-1/eps) * nablam_F(x,lam,t) + (1/eps)*integ
+        ls[i] = lam + mvt * DT - mu_lam(x, lam, t) * DT + sigma_lam(x, lam, t) * dW(DT)
         
         
 
-    return TS, xs, ls, mts
+    return TS, xs, ls
 
 
 
-def plot_simulations(num_sims: int):
+"""Generate colour palette with n colours (For mckean plots)"""
+def get_N_HexCol(N):
+    HSV_tuples = [(x * 1.0 / N, 0.5, 0.5) for x in range(N)]
+    hex_out = []
+    for rgb in HSV_tuples:
+        rgb = map(lambda x: int(x * 255), colorsys.hsv_to_rgb(*rgb))
+        hex_out.append('#%02x%02x%02x' % tuple(rgb))
+    return hex_out
+
+def plot_simulations_OLD(num_sims: int):
     fig = plt.figure()
     """ Plot several simulations in one image."""
     for i in range(num_sims):
@@ -201,30 +217,66 @@ def plot_simulations(num_sims: int):
     plt.title("Simulations of Stocbio SDE")
     plt.show()
     return TS, xs, ls
-    
-def plot_simulations_mckean(num_sims: int, num_xs: int):
-    fig = plt.figure()
+
+def plot_simulations(num_sims: int):
+    palette_num = get_N_HexCol(num_sims)
+    fig, ax = plt.subplots(1)
+    fig2, ax2 = plt.subplots(1)
     """ Plot several simulations in one image."""
     for i in range(num_sims):
-        TS, xs, ls, mts = run_mckean(num_xs)
-        if i == num_sims - 1:
-            plt.plot(TS, xs, label='x')
-            plt.plot(TS, ls, label='$\lambda$')
-        else:
-            plt.plot(TS, xs)
-            plt.plot(TS, ls)
+        TS, xs, ls = run_sde()
+        ax.plot(TS, ls, palette_num[i])
+        #ax2.plot(TS, np.mean(xs, axis = 0), palette_num[i])
+        ax2.plot(TS, xs, palette_num[i])
+        #for j in range(num_xs):
+        #    ax2.plot(TS, xs[j], palette_num[i])
+    ax.set_xlabel("time")
+    ax.set_ylabel("$\lambda$")
+    ax.legend()
+    ax.set_title("Simulations of Stocbio SDE - $\lambda$-values")
+    fig.show()
+    
+    ax2.set_xlabel("time")
+    ax2.set_ylabel("$x$")
+    ax2.legend()
+    ax2.set_title("Simulations of Stocbio SDE - $X$-values")
+    fig2.show()
+    
+    return TS, xs, ls
+
+    
+def plot_simulations_mckean(num_sims: int, num_xs: int):
+    palette_num = get_N_HexCol(num_sims)
+    fig, ax = plt.subplots(1)
+    fig2, ax2 = plt.subplots(1)
+    """ Plot several simulations in one image."""
+    for i in range(num_sims):
+        TS, xs, ls = run_mckean(num_xs)
+        ax.plot(TS, ls, palette_num[i])
+        #ax2.plot(TS, np.mean(xs, axis = 0), palette_num[i])
+        ax2.plot(TS, xs, palette_num[i])
+        #for j in range(num_xs):
+        #    ax2.plot(TS, xs[j], palette_num[i])
+        
         
 
-    plt.xlabel("time")
-    plt.ylabel("x,$\lambda$")
-    plt.legend()
-    plt.title("Simulations of Mckean-Vlasov SDE")
-    plt.show()
-    return TS, xs, ls, mts
+    ax.set_xlabel("time")
+    ax.set_ylabel("$\lambda$")
+    ax.legend()
+    ax.set_title("Simulations of Mckean-Vlasov SDE - $\lambda$-values")
+    fig.show()
+    
+    ax2.set_xlabel("time")
+    ax2.set_ylabel("$x$")
+    ax2.legend()
+    ax2.set_title("Simulations of Mckean-Vlasov SDE - $X$-values")
+    fig2.show()
+    
+    return TS, xs, ls
 
 
 if __name__ == "__main__":
     NUM_SIMS = 5
-    mckean_samples = 10
+    mckean_samples = 100
     TS, xs, ls = plot_simulations(NUM_SIMS)
-    #TS_m, xs_m, ls_m, mts = plot_simulations_mckean(NUM_SIMS,mckean_samples)
+    TS_m, xs_m, ls_m = plot_simulations_mckean(NUM_SIMS,mckean_samples)

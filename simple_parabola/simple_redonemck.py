@@ -65,9 +65,10 @@ def mckean_term(xvs, lam: float, t: float, DT: float, num_xs: int) -> float:
     nablamFs = np.zeros(num_xs)
     pdfx = np.zeros(num_xs)
     integ = 0
+    eps0 = Model.EPSILON
     
     for i in range(num_xs):
-        xvals[i] = xvs[i] + sigma_x(xvs[i], lam, t) * dW(DT)
+        xvals[i] = xvs[i] + mu_x(xvs[i],lam,t)*DT/eps0 + sigma_x(xvs[i], lam, t) * dW(DT)
         #print("X_{n+1} = " + str(xnew))
         nablamFs[i] = nablam_F(xvals[i],lam,t)
         #("nabla_lam_F" + str(nablamF))
@@ -118,10 +119,10 @@ def run_sde():
 def run_mckean(num_xs: int):
     """ Return the result of one full simulation."""
     T_INIT = 0
-    T_END = 100
+    T_END = 10
     eps = Model.EPSILON
     
-    N = 40000  # Compute at 1000 grid points
+    N = 4000  # Compute at 1000 grid points
     DT = float(T_END - T_INIT) / N
     TS = np.arange(T_INIT, T_END + DT, DT)
 
@@ -130,20 +131,24 @@ def run_mckean(num_xs: int):
     L_INIT = 1
 
     """Initialize arrays to save intermediate results"""
-    xs = np.zeros((num_xs,TS.size))
-    xs[:,0] = X_INIT
+    #xs = np.zeros((num_xs,TS.size))
+    xs = np.zeros(TS.size)
+    #xs[:,0] = X_INIT
+    xs[0] = X_INIT
     ls = np.zeros(TS.size)
     ls[0] = L_INIT
     """Initialize first batch of x-values"""
     xvs = X_INIT * np.ones(TS.size)
+    x_arg = random.choice(range(num_xs))
     for i in range(1, TS.size):
         t = T_INIT + (i - 1) * DT
         lam = ls[i - 1]
         """Generate multiple X values for next timestep alongside the integral term"""
         integ, xvs = mckean_term(xvs, lam, t, DT, num_xs)
-        xs[:,i] = xvs
-        j = random.choice(range(num_xs))
-        x = xvs[j]
+        #xs[:,i] = xvs
+        x = xvs[x_arg]
+        xs[i] = x
+        """Encode mckean term"""
         mvt = (-1/eps) * nablam_F(x,lam,t) + (1/eps)*integ
         ls[i] = lam + mvt * DT + mu_lam(x, lam, t) * DT + sigma_lam(x, lam, t) * dW(DT)
         
@@ -160,7 +165,7 @@ def get_N_HexCol(N):
         hex_out.append('#%02x%02x%02x' % tuple(rgb))
     return hex_out
 
-def plot_simulations(num_sims: int):
+def plot_simulations_OLD(num_sims: int):
     fig = plt.figure()
     """ Plot several simulations in one image."""
     for i in range(num_sims):
@@ -179,6 +184,33 @@ def plot_simulations(num_sims: int):
     plt.title("Simulations of Stocbio SDE")
     plt.show()
     return TS, xs, ls
+
+def plot_simulations(num_sims: int):
+    palette_num = get_N_HexCol(num_sims)
+    fig, ax = plt.subplots(1)
+    fig2, ax2 = plt.subplots(1)
+    """ Plot several simulations in one image."""
+    for i in range(num_sims):
+        TS, xs, ls = run_sde()
+        ax.plot(TS, ls, palette_num[i])
+        #ax2.plot(TS, np.mean(xs, axis = 0), palette_num[i])
+        ax2.plot(TS, xs, palette_num[i])
+        #for j in range(num_xs):
+        #    ax2.plot(TS, xs[j], palette_num[i])
+    ax.set_xlabel("time")
+    ax.set_ylabel("$\lambda$")
+    ax.legend()
+    ax.set_title("Simulations of Stocbio SDE - $\lambda$-values")
+    fig.show()
+    
+    ax2.set_xlabel("time")
+    ax2.set_ylabel("$x$")
+    ax2.legend()
+    ax2.set_title("Simulations of Stocbio SDE - $X$-values")
+    fig2.show()
+    
+    return TS, xs, ls
+
     
 def plot_simulations_mckean(num_sims: int, num_xs: int):
     palette_num = get_N_HexCol(num_sims)
@@ -188,7 +220,8 @@ def plot_simulations_mckean(num_sims: int, num_xs: int):
     for i in range(num_sims):
         TS, xs, ls = run_mckean(num_xs)
         ax.plot(TS, ls, palette_num[i])
-        ax2.plot(TS, np.mean(xs, axis = 0), palette_num[i])
+        #ax2.plot(TS, np.mean(xs, axis = 0), palette_num[i])
+        ax2.plot(TS, xs, palette_num[i])
         #for j in range(num_xs):
         #    ax2.plot(TS, xs[j], palette_num[i])
         
@@ -203,7 +236,7 @@ def plot_simulations_mckean(num_sims: int, num_xs: int):
     ax2.set_xlabel("time")
     ax2.set_ylabel("$x$")
     ax2.legend()
-    ax2.set_title("Simulations of Mckean-Vlasov SDE - mean $x$-values")
+    ax2.set_title("Simulations of Mckean-Vlasov SDE - $X$-values")
     fig2.show()
     
     return TS, xs, ls

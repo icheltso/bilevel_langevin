@@ -24,8 +24,8 @@ import colorsys
 
 class Model:
     """Stochastic model constants."""
-    SIGMA_X = 0.06
-    SIGMA_lam = 0.06
+    SIGMA_X = 0.1
+    SIGMA_lam = 0.1
     """Epsilon serves to differentiate between the two timesteps of the inner and outer problem"""
     EPSILON = 0.05
 
@@ -90,10 +90,10 @@ def mckean_term(xvs, lam: float, t: float, DT: float, num_xs: int) -> float:
 def run_sde():
     """ Return the result of one full simulation."""
     T_INIT = 0
-    T_END = 10
+    T_END = 2
     eps = Model.EPSILON
     
-    N = 4000  # Compute at 1000 grid points
+    N = 1000  # Compute at 1000 grid points
     DT = float(T_END - T_INIT) / N
     TS = np.arange(T_INIT, T_END + DT, DT)
 
@@ -119,16 +119,19 @@ def run_sde():
 def run_mckean(num_xs: int):
     """ Return the result of one full simulation."""
     T_INIT = 0
-    T_END = 10
+    T_END = 2
     eps = Model.EPSILON
     
-    N = 4000  # Compute at 1000 grid points
+    N = 1000  # Compute at 1000 grid points
     DT = float(T_END - T_INIT) / N
     TS = np.arange(T_INIT, T_END + DT, DT)
 
 
     X_INIT = 0
     L_INIT = 1
+    
+    cl_sig = 1
+    X_CLOUD = np.random.normal(0,cl_sig,num_xs)
 
     """Initialize arrays to save intermediate results"""
     #xs = np.zeros((num_xs,TS.size))
@@ -138,7 +141,8 @@ def run_mckean(num_xs: int):
     ls = np.zeros(TS.size)
     ls[0] = L_INIT
     """Initialize first batch of x-values"""
-    xvs = X_INIT * np.ones(TS.size)
+    #xvs = X_INIT * np.ones(num_xs)
+    xvs = X_CLOUD
     """index of X that is used to update lambda."""
     #x_arg = random.choice(range(num_xs))
     x_arg = 0
@@ -177,15 +181,17 @@ def get_CI(xs,ls):
     
     print(pt_ct)
     
-    #XCI = 1.96 * xstd / np.sqrt(pt_ct)
-    XCI = xstd
+    XCI = 1.96 * xstd / np.sqrt(pt_ct)
+    print(XCI)
+    #XCI = xstd
     XCIL = xsm - XCI
     XCIU = xsm + XCI
     
-    #LCI = 1.96 * lstd / np.sqrt(pt_ct)
-    LCI = lstd
+    LCI = 1.96 * lstd / np.sqrt(pt_ct)
+    #LCI = lstd
     LCIL = lsm - LCI
     LCIU = lsm + LCI
+    
     
     return xsm, XCIL, XCIU, lsm, LCIL, LCIU
 
@@ -216,6 +222,7 @@ def plot_simulations(num_sims: int):
     fig_ci, ax_ci = plt.subplots(1)
     fig2, ax2 = plt.subplots(1)
     fig2_ci, ax2_ci = plt.subplots(1)
+    #fig_t, ax_t = plt.subplots(1)
     """ Plot several simulations in one image."""
     xs_many = []
     ls_many = []
@@ -237,6 +244,9 @@ def plot_simulations(num_sims: int):
     ax2_ci.plot(TS,xsm)
     ax2_ci.fill_between(TS, XCIL, XCIU, color="blue", alpha=.15)
     
+    #ax_t.hist(xsnp[:,2000])
+    #fig_t.show()
+    #print(np.std(xsnp[:,2000]))
     
     ax.set_xlabel("time")
     ax.set_ylabel("$\lambda$")
@@ -261,23 +271,37 @@ def plot_simulations(num_sims: int):
     ax2_ci.set_title("Simulations of Stocbio SDE - C.I. $X$-values")
     fig2_ci.show()
     
-    return TS, xs, ls
+    return TS, xs, ls, xsm, XCIL, XCIU, lsm, LCIL, LCIU
 
     
 def plot_simulations_mckean(num_sims: int, num_xs: int):
+    """Plot results of stocbio run alongside confidence intervals"""
     palette_num = get_N_HexCol(num_sims)
     fig, ax = plt.subplots(1)
+    fig_ci, ax_ci = plt.subplots(1)
     fig2, ax2 = plt.subplots(1)
+    fig2_ci, ax2_ci = plt.subplots(1)
+    #fig_t, ax_t = plt.subplots(1)
     """ Plot several simulations in one image."""
+    xs_many = []
+    ls_many = []
     for i in range(num_sims):
         TS, xs, ls = run_mckean(num_xs)
+        xs_many.append(xs)
+        ls_many.append(ls)
         ax.plot(TS, ls, palette_num[i])
         #ax2.plot(TS, np.mean(xs, axis = 0), palette_num[i])
         ax2.plot(TS, xs, palette_num[i])
         #for j in range(num_xs):
         #    ax2.plot(TS, xs[j], palette_num[i])
         
-        
+    xsnp = np.asarray(xs_many)
+    lsnp = np.asarray(ls_many)
+    xsm, XCIL, XCIU, lsm, LCIL, LCIU = get_CI(xsnp,lsnp)
+    ax_ci.plot(TS,lsm)
+    ax_ci.fill_between(TS, LCIL, LCIU, color="blue", alpha=.15)
+    ax2_ci.plot(TS,xsm)
+    ax2_ci.fill_between(TS, XCIL, XCIU, color="blue", alpha=.15)
 
     ax.set_xlabel("time")
     ax.set_ylabel("$\lambda$")
@@ -285,17 +309,52 @@ def plot_simulations_mckean(num_sims: int, num_xs: int):
     ax.set_title("Simulations of Mckean-Vlasov SDE - $\lambda$-values")
     fig.show()
     
+    ax_ci.set_xlabel("time")
+    ax_ci.set_ylabel("$\lambda$")
+    ax_ci.set_title("Simulations of Mckean-Vlasov SDE - C.I. $\lambda$-values")
+    fig_ci.show()
+    
     ax2.set_xlabel("time")
     ax2.set_ylabel("$x$")
     ax2.legend()
     ax2.set_title("Simulations of Mckean-Vlasov SDE - $X$-values")
     fig2.show()
     
-    return TS, xs, ls
+    ax2_ci.set_xlabel("time")
+    ax2_ci.set_ylabel("$x$")
+    ax2_ci.set_title("Simulations of Mckean-Vlasov SDE - C.I. $X$-values")
+    fig2_ci.show()
+    
+    return TS, xs, ls, xsm, XCIL, XCIU, lsm, LCIL, LCIU
 
 
 if __name__ == "__main__":
-    NUM_SIMS = 100
+    NUM_SIMS = 10
     mckean_samples = 100
-    TS, xs, ls = plot_simulations(NUM_SIMS)
-    #TS_m, xs_m, ls_m = plot_simulations_mckean(NUM_SIMS,mckean_samples)
+    TS, xs, ls,       xsm1, XCIL1, XCIU1, lsm1, LCIL1, LCIU1 = plot_simulations(NUM_SIMS)
+    TS_m, xs_m, ls_m, xsm2, XCIL2, XCIU2, lsm2, LCIL2, LCIU2 = plot_simulations_mckean(NUM_SIMS,mckean_samples)
+    
+    fig_both_x, ax_x = plt.subplots(1)
+    fig_both_l, ax_l = plt.subplots(1)
+    
+    ax_x.plot(TS, xsm1, label = 'stocbio',color="blue")
+    ax_x.fill_between(TS, XCIL1, XCIU1, color="blue", alpha=.15)
+    ax_x.plot(TS_m, xsm2, label = 'mckean',color="orange")
+    ax_x.fill_between(TS_m, XCIL2, XCIU2, color="orange", alpha=.15)
+    ax_x.legend()
+    ax_x.set_xlabel("time")
+    ax_x.set_ylabel("X")
+    str1 = "2-D Problem: " + str(NUM_SIMS) + " simulations, " + "95%C.I. X-values"
+    ax_x.set_title( str1 )
+    fig_both_x.show()
+    
+    ax_l.plot(TS, lsm1, label = 'stocbio',color="blue")
+    ax_l.fill_between(TS, LCIL1, LCIU1, color="blue", alpha=.15)
+    ax_l.plot(TS_m, lsm2, label = 'mckean',color="orange")
+    ax_l.fill_between(TS_m, LCIL2, LCIU2, color="orange", alpha=.15)
+    ax_l.legend()
+    str2 = "2-D Problem: " + str(NUM_SIMS) + " simulations, " + "95%C.I. $\lambda$-values"
+    ax_l.set_title(str2)
+    ax_l.set_xlabel("time")
+    ax_l.set_ylabel("$\lambda$")
+    fig_both_l.show()
